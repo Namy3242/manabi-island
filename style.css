@@ -154,6 +154,91 @@ main { max-width: 720px; margin: 0 auto; padding: 16px; }
 .feedback.good { color: #2b8a3e; }
 .feedback.try { color: #e8590c; }
 
+.choice-btn.small-choice { font-size: 1.02rem; line-height: 1.45; padding: 12px 6px; }
+.question .seq { display: block; font-size: 1.6rem; letter-spacing: 1px; }
+.question .silhouette { font-size: 4.2rem; line-height: 1.2; }
+.question svg.taru-svg { max-width: 330px; width: 100%; }
+
+/* たからさがし */
+.map-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 5px;
+  max-width: 336px;
+  margin: 6px auto 0;
+}
+.map-cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.55rem;
+  background: #fdf6d8;
+  border-radius: 10px;
+}
+.map-cell.wall { background: #a9dfa0; }
+.map-cell.goal.open { background: #ffe08a; box-shadow: inset 0 0 0 3px #ff9f1c; }
+.map-cell.door { background: #ffd8a8; box-shadow: inset 0 0 0 3px #e8890c; }
+.map-cell.door-open { background: #fdf6d8; opacity: 0.55; }
+.map-cell.player { background: #ffe3ec; }
+.choices.dpad-mode { display: block; }
+.dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 72px);
+  gap: 8px;
+  justify-content: center;
+}
+.dpad-btn {
+  font-family: inherit;
+  font-size: 1.8rem;
+  height: 64px;
+  border: 3px solid #bde0fe;
+  border-radius: 16px;
+  background: #fff;
+  cursor: pointer;
+}
+.dpad-btn:active { transform: scale(0.94); background: #e7f5ff; }
+
+/* まとあて */
+.choices.stage-mode { display: block; }
+.target-stage {
+  position: relative;
+  height: 300px;
+  background: linear-gradient(180deg, #d8f4ff, #f2fcff);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 4px 10px rgba(0,60,90,0.10);
+}
+.target-bubble {
+  position: absolute;
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  border: 3px solid #74c0fc;
+  background: radial-gradient(circle at 35% 30%, #ffffff, #cfeaff);
+  font-family: inherit;
+  font-size: 1.9rem;
+  font-weight: bold;
+  color: #234;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation-name: floaty;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+}
+@keyframes floaty {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(8px, -16px); }
+}
+.target-bubble.hit {
+  background: radial-gradient(circle at 35% 30%, #fffbe0, #ffd93d);
+  border-color: #ff9f1c;
+  transform: scale(1.15);
+}
+.target-bubble.miss { opacity: 0.35; }
+
 /* 結果画面 */
 .result-title { text-align: center; font-size: 2rem; margin-top: 40px; }
 .result-text { text-align: center; font-size: 1.4rem; font-weight: bold; }
@@ -180,4 +265,9 @@ main { max-width: 720px; margin: 0 auto; padding: 16px; }
   .game-card { min-height: 110px; }
   .question { font-size: 1.3rem; }
   .choice-btn { font-size: 1.5rem; }
+  .choice-btn.small-choice { font-size: 0.95rem; }
+  .target-stage { height: 260px; }
+  .target-bubble { width: 72px; height: 72px; font-size: 1.6rem; }
+  .map-cell { font-size: 1.3rem; }
+  .question .seq { font-size: 1.25rem; }
 }

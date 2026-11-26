@@ -271,10 +271,281 @@ function qClock() {
   };
 }
 
+/* ---- おみせやさん ---- */
+const SHOP_ITEMS_KIDS = [
+  ['りんご', '🍎'], ['パン', '🍞'], ['ケーキ', '🍰'], ['アイス', '🍦'],
+  ['ドーナツ', '🍩'], ['あめ', '🍬'], ['ジュース', '🧃'], ['クッキー', '🍪'],
+  ['バナナ', '🍌'], ['みかん', '🍊'],
+];
+const SHOP_ITEMS_ELEM = [
+  ...SHOP_ITEMS_KIDS,
+  ['ほん', '📕'], ['えんぴつ', '✏️'], ['ノート', '📓'], ['ぼうし', '🧢'],
+  ['おにぎり', '🍙'], ['プリン', '🍮'], ['サンドイッチ', '🥪'], ['はな', '💐'],
+];
+
+// 金額（10円単位）→ コインの組み合わせ文字列。例: 160 → 「100円玉×1・50円玉×1・10円玉×1」
+// ときどき大きなコインを細かく崩して、組み合わせにバリエーションを出す
+function coinComboText(total) {
+  const counts = { 500: 0, 100: 0, 50: 0, 10: 0 };
+  let rest = total;
+  [500, 100, 50, 10].forEach((d) => { counts[d] = Math.floor(rest / d); rest %= d; });
+  if (Math.random() < 0.35) {
+    if (counts[500] >= 1) { counts[500]--; counts[100] += 5; }
+    else if (counts[100] >= 1) { counts[100]--; counts[50] += 2; }
+    else if (counts[50] >= 1) { counts[50]--; counts[10] += 5; }
+  }
+  return [500, 100, 50, 10].filter((d) => counts[d] > 0).map((d) => `${d}円玉×${counts[d]}`).join('・');
+}
+
+// ぴったり払う問題の選択肢（正解＋合計金額が違う3つ）。文字列が一意に合計を表すので重複しない
+function shopExactChoices(price) {
+  const answer = coinComboText(price);
+  const offsets = shuffle([10, -10, 20, -20, 30, -30, 40, -40, 50, 60, 70, 80, 90, 100]);
+  const totals = [];
+  for (const off of offsets) {
+    const t = price + off;
+    if (t >= 10 && t !== price && !totals.includes(t)) totals.push(t);
+    if (totals.length >= 3) break;
+  }
+  return { choices: shuffle([answer, ...totals.map((t) => coinComboText(t))]), answer };
+}
+
+function qShopKids() {
+  const [name, emoji] = pick(SHOP_ITEMS_KIDS);
+  const price = rand(2, 10) * 10; // 20〜100円
+  const { choices, answer } = shopExactChoices(price);
+  return {
+    html: `<span class="prompt">🧑‍🍳「${name}は ${price}えん です」</span><span class="emoji-row">${emoji}</span><span class="prompt">ぴったり はらえるのは どれ？</span>`,
+    choices,
+    answer,
+    smallChoices: true,
+    hint: `${price}えんに なる コインの あわせかたを さがそう。大きなコインから かんがえると わかりやすいよ。`,
+    testMeta: { kind: 'exact', price },
+  };
+}
+
+function qShopElem() {
+  const [name, emoji] = pick(SHOP_ITEMS_ELEM);
+  if (Math.random() < 0.5) {
+    // おつり（500円玉または1000円札を出す）
+    const useThousand = Math.random() < 0.5;
+    const price = useThousand ? rand(51, 99) * 10 : rand(11, 49) * 10;
+    const paid = useThousand ? 1000 : 500;
+    const change = paid - price;
+    return {
+      html: `<span class="prompt">🧑‍🍳「${name}は ${price}えん です」</span><span class="emoji-row">${emoji}</span><span class="prompt">${paid}えんを だしたら、おつりは いくら？</span>`,
+      choices: numberChoices(change).map(String),
+      answer: String(change),
+      hint: `${paid} － ${price} を けいさんしてみよう。`,
+      testMeta: { kind: 'change', price, paid },
+    };
+  }
+  // ぴったり払う（120〜990円）
+  const price = rand(12, 99) * 10;
+  const { choices, answer } = shopExactChoices(price);
+  return {
+    html: `<span class="prompt">🧑‍🍳「${name}は ${price}えん です」</span><span class="emoji-row">${emoji}</span><span class="prompt">ぴったり はらえるのは どれ？</span>`,
+    choices,
+    answer,
+    smallChoices: true,
+    hint: '500円玉・100円玉・50円玉・10円玉を、大きなものから じゅんに あわせていこう。',
+    testMeta: { kind: 'exact', price },
+  };
+}
+
+/* ---- たるかぞえ（立体カウント） ---- */
+// 高さマップ: 3×3の各マスに下から積まれた樽の段数。総数＝段数の合計（浮いた樽は構造上できない）
+function taruHiddenExists(h) {
+  // 同じ斜め列（c-r が同じ）で、奥のマスより手前のマスが同じか高く積まれていれば「隠れる段」がある
+  for (let d = -2; d <= 2; d++) {
+    const cells = [];
+    for (let r = 0; r < 3; r++) {
+      const c = r + d;
+      if (c >= 0 && c < 3) cells.push(h[r][c]);
+    }
+    for (let i = 0; i < cells.length; i++) {
+      for (let j = i + 1; j < cells.length; j++) {
+        if (cells[i] >= 1 && cells[j] >= cells[i]) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function genTaruHeights() {
+  const empty = () => [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  if (course === 'kids') {
+    for (let tries = 0; tries < 200; tries++) {
+      const h = empty();
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) h[r][c] = Math.random() < 0.45 ? rand(1, 2) : 0;
+      const total = h.flat().reduce((a, b) => a + b, 0);
+      if (total >= 4 && total <= 10 && h.flat().some((v) => v === 2)) return h;
+    }
+    return [[1, 2, 0], [0, 1, 2], [1, 0, 1]]; // 合計8
+  }
+  for (let tries = 0; tries < 300; tries++) {
+    const h = empty();
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        const x = Math.random();
+        h[r][c] = x < 0.25 ? 0 : x < 0.55 ? 1 : x < 0.8 ? 2 : x < 0.93 ? 3 : 4;
+      }
+    }
+    const total = h.flat().reduce((a, b) => a + b, 0);
+    if (total >= 12 && total <= 20 && Math.max(...h.flat()) >= 3 && taruHiddenExists(h)) return h;
+  }
+  return [[2, 3, 1], [1, 4, 2], [0, 2, 3]]; // 合計18・隠れる段あり
+}
+
+// 高さマップをSVGで描く。奥（r+c が小さい）→手前の順に描くので、樽が自然に隠れる
+function taruSVG(h) {
+  const bw = 38, bh = 20, dx = 43, dy = 20, ox = 160, oy = 86;
+  const cells = [];
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) cells.push({ r, c, v: h[r][c] });
+  cells.sort((a, b) => (a.r + a.c) - (b.r + b.c));
+  let s = '<svg class="taru-svg" viewBox="0 0 320 196" role="img" aria-label="つまれた たる">';
+  // 地面のマス目
+  for (const { r, c } of cells) {
+    const x = ox + (c - r) * dx;
+    const y = oy + (r + c) * dy;
+    s += `<polygon points="${x},${y - 11} ${x + 22},${y} ${x},${y + 11} ${x - 22},${y}" fill="#ffe9b8" stroke="#f0d48a"/>`;
+  }
+  // 樽（マスごと下から上へ）
+  for (const { r, c, v } of cells) {
+    const x = ox + (c - r) * dx;
+    const yBase = oy + (r + c) * dy;
+    for (let lv = 0; lv < v; lv++) {
+      const topY = yBase - (lv + 1) * bh;
+      s += `<rect x="${x - bw / 2}" y="${topY + 6}" width="${bw}" height="${bh - 6}" fill="#d98e4a" stroke="#a05e2c" stroke-width="1.5"/>`;
+      s += `<rect x="${x + bw / 6}" y="${topY + 6}" width="${bw / 3}" height="${bh - 6}" fill="#b96f35" opacity="0.35"/>`;
+      s += `<line x1="${x - bw / 2}" y1="${topY + 13}" x2="${x + bw / 2}" y2="${topY + 13}" stroke="#a05e2c" stroke-width="1.5" opacity="0.55"/>`;
+      s += `<ellipse cx="${x}" cy="${topY + 6}" rx="${bw / 2}" ry="6" fill="#f2bc7d" stroke="#a05e2c" stroke-width="1.5"/>`;
+    }
+  }
+  return s + '</svg>';
+}
+
+function qTaru() {
+  const h = genTaruHeights();
+  const total = h.flat().reduce((a, b) => a + b, 0);
+  return {
+    html: `<span class="prompt">たるは ぜんぶで いくつ？</span>${taruSVG(h)}<span class="prompt">かくれている たるも かぞえよう！</span>`,
+    choices: numberChoices(total).map(String),
+    answer: String(total),
+    hint: 'マスごとに、下から つみあがっている たるを かぞえて、ぜんぶ たしてみよう。',
+    testMeta: { heights: h, total },
+  };
+}
+
+/* ---- なぞときパズル ---- */
+const ODD_SETS = {
+  fruits: ['🍎', '🍊', '🍓', '🍌', '🍇', '🍉', '🍑', '🍒'],
+  veggies: ['🥕', '🥦', '🍅', '🥒', '🌽'],
+  animals: ['🐶', '🐱', '🐰', '🐴', '🐷', '🐮'],
+  sea: ['🐟', '🐙', '🦀', '🐳', '🐠', '🦐'],
+  vehicles: ['🚗', '🚌', '🚃', '✈️', '🚢', '🚲'],
+  sweets: ['🍰', '🍦', '🍩', '🍬', '🍮', '🍫'],
+};
+// [なかま3つ の分類, なかまはずれ の分類]（分類どうしは重ならないので正解は必ず1つ）
+const ODD_PAIRS = [
+  ['fruits', 'vehicles'], ['veggies', 'vehicles'], ['animals', 'vehicles'],
+  ['sea', 'sweets'], ['sweets', 'animals'], ['vehicles', 'fruits'],
+  ['fruits', 'animals'], ['animals', 'sweets'], ['veggies', 'sweets'],
+];
+
+function qPuzzleOdd() {
+  const [main, oddCat] = pick(ODD_PAIRS);
+  const mains = shuffle(ODD_SETS[main].slice()).slice(0, 3);
+  const odd = pick(ODD_SETS[oddCat]);
+  return {
+    html: '<span class="prompt">なかまはずれは どれ？</span><span class="prompt">3つは おなじ なかま、1つだけ ちがうよ</span>',
+    choices: shuffle([odd, ...mains]),
+    answer: odd,
+    emojiChoices: true,
+    hint: '3つは おなじ なかま。1つだけ ちがう なかまが まざっているよ。',
+    testMeta: { type: 'odd', mainSet: ODD_SETS[main], odd },
+  };
+}
+
+function seqEmojiQuestion(unit, showLen) {
+  const shown = Array.from({ length: showLen }, (_, i) => unit[i % unit.length]);
+  const next = unit[showLen % unit.length];
+  return {
+    html: `<span class="prompt">つぎに くるのは どれ？</span><span class="emoji-row">${shown.join('')} ➡️ ❓</span>`,
+    choices: makeChoices(next, [...unit, '🍊', '🐱', '🚗', '🌷', '⭐']),
+    answer: next,
+    emojiChoices: true,
+    hint: 'おなじ じゅんばんが くりかえされているよ。さいしょから 見なおしてみよう。',
+    testMeta: { type: 'seq', unit, shown, next },
+  };
+}
+
+function qPuzzleSeqKids() {
+  const e = shuffle(['🍎', '🍌', '⭐', '🌙', '🍓', '🐶', '🌸', '🍇']).slice(0, 3);
+  const unit = pick([[e[0], e[1]], [e[0], e[0], e[1]], [e[0], e[1], e[2]]]);
+  return seqEmojiQuestion(unit, 5);
+}
+
+function qPuzzleSeqElem() {
+  if (Math.random() < 0.3) {
+    const e = shuffle(['🍎', '🍌', '⭐', '🌙', '🍓', '🐶', '🌸', '🍇']).slice(0, 3);
+    const unit = pick([[e[0], e[1], e[2]], [e[0], e[0], e[1]], [e[0], e[1], e[0]]]);
+    return seqEmojiQuestion(unit, 6);
+  }
+  const kind = pick(['add', 'sub', 'mul2']);
+  let seq, next;
+  if (kind === 'add') {
+    const start = rand(1, 20), diff = rand(2, 9);
+    seq = Array.from({ length: 5 }, (_, i) => start + diff * i);
+    next = start + diff * 5;
+  } else if (kind === 'sub') {
+    const diff = rand(2, 8), start = rand(5 * diff + 2, 5 * diff + 40);
+    seq = Array.from({ length: 5 }, (_, i) => start - diff * i);
+    next = start - diff * 5;
+  } else {
+    const start = pick([1, 2, 3]);
+    seq = Array.from({ length: 5 }, (_, i) => start * 2 ** i);
+    next = start * 2 ** 5;
+  }
+  return {
+    html: `<span class="prompt">つぎに くる かずは どれ？</span><span class="seq">${seq.join(' → ')} → ？</span>`,
+    choices: numberChoices(next).map(String),
+    answer: String(next),
+    hint: 'となりどうしの かずが、どう かわっているか 見てみよう（たされている／ひかれている／2ばいに なっている）。',
+    testMeta: { type: 'seqnum', seq, next },
+  };
+}
+
+const SHAPE_EMOJIS = ['🍎', '🍌', '🐟', '🚗', '🌙', '⭐', '🍄', '🦋', '🐢', '✈️', '🍓', '🐶', '🍇', '🚃', '🌸', '🐙'];
+
+function qPuzzleShape() {
+  const target = pick(SHAPE_EMOJIS);
+  const rot = course === 'elem' ? pick([0, 90, 180, 270]) : 0;
+  const style = `filter: brightness(0); display: inline-block;${rot ? ` transform: rotate(${rot}deg);` : ''}`;
+  return {
+    html: `<span class="prompt">この シルエット（かげ）は どれかな？</span><span class="silhouette" style="${style}">${target}</span>`,
+    choices: makeChoices(target, SHAPE_EMOJIS),
+    answer: target,
+    emojiChoices: true,
+    hint: 'かたちの とくちょう（とがっている・まるい・あしや はねが あるか）を よく見てみよう。',
+    testMeta: { type: 'shape', target },
+  };
+}
+
+function qPuzzle() {
+  const t = pick(['odd', 'seq', 'shape']);
+  if (t === 'odd') return qPuzzleOdd();
+  if (t === 'shape') return qPuzzleShape();
+  return course === 'kids' ? qPuzzleSeqKids() : qPuzzleSeqElem();
+}
+
 const GENERATORS = {
   number: () => (course === 'kids' ? qNumberKids() : qNumberElem()),
   moji: () => (course === 'kids' ? qMojiKids() : qMojiElem()),
   clock: () => qClock(),
+  shop: () => (course === 'kids' ? qShopKids() : qShopElem()),
+  taru: () => qTaru(),
+  puzzle: () => qPuzzle(),
 };
 
 /* ============ ゲーム進行 ============ */
@@ -285,14 +556,27 @@ let qIndex = 0;
 let earnedThisSet = 0;
 let locked = false;
 
+// カスタム進行ゲーム（たからさがし／まとあて）の後片付け（タイマー・キー監視の解除）
+let customCleanup = null;
+function runCustomCleanup() {
+  if (customCleanup) {
+    const f = customCleanup;
+    customCleanup = null;
+    f();
+  }
+}
+
 const PRAISES = ['せいかい！すごい！🎉', 'やったね！せいかい！✨', 'ばっちり！せいかい！🌟'];
 
 function startGame(game) {
+  runCustomCleanup();
   currentGame = game;
-  questions = Array.from({ length: QUESTIONS_PER_SET }, () => GENERATORS[game]());
   qIndex = 0;
   earnedThisSet = 0;
   showScreen('screen-game');
+  if (game === 'treasure') { startTreasure(); return; }
+  if (game === 'target') { startTarget(); return; }
+  questions = Array.from({ length: QUESTIONS_PER_SET }, () => GENERATORS[game]());
   renderQuestion();
 }
 
@@ -304,10 +588,11 @@ function renderQuestion() {
   $('#feedback').textContent = '';
   $('#feedback').className = 'feedback';
   const box = $('#choices');
+  box.className = 'choices';
   box.innerHTML = '';
   q.choices.forEach((c) => {
     const btn = document.createElement('button');
-    btn.className = 'choice-btn' + (q.emojiChoices ? ' emoji-choice' : '');
+    btn.className = 'choice-btn' + (q.emojiChoices ? ' emoji-choice' : '') + (q.smallChoices ? ' small-choice' : '');
     btn.textContent = c;
     btn.addEventListener('click', () => answer(btn, c));
     box.appendChild(btn);
@@ -353,6 +638,329 @@ function finishSet() {
   showScreen('screen-result');
 }
 
+// カスタム進行ゲーム用の結果表示（既存の結果画面をそのまま使う）
+function finishCustomSet(mainText, extraText) {
+  runCustomCleanup();
+  soundFinish();
+  $('#result-text').textContent = mainText;
+  $('#result-stars').textContent =
+    '⭐'.repeat(Math.max(earnedThisSet, 0)) + `\nスター ${earnedThisSet}こ ゲット！（ぜんぶで ${totalStars}こ）` +
+    (extraText ? `\n${extraText}` : '');
+  showScreen('screen-result');
+}
+
+function setFeedback(text, kind) {
+  const fb = $('#feedback');
+  fb.textContent = text;
+  fb.className = 'feedback' + (kind ? ` ${kind}` : '');
+}
+
+/* ============ まとあてアクション ============ */
+const TARGET_KANA_KIDS = ['あ', 'い', 'う', 'え', 'お', 'か', 'き', 'く', 'け', 'こ', 'さ', 'し', 'す', 'せ', 'そ', 'た', 'ち', 'つ', 'て', 'と'];
+const TARGET_KANA_ELEM = ['ア', 'イ', 'ウ', 'エ', 'オ', 'カ', 'キ', 'ク', 'ケ', 'コ', 'サ', 'シ', 'ス', 'セ', 'ソ', 'タ', 'チ', 'ツ', 'テ', 'ト'];
+
+// 戻り値: { prompt, labels:[4つ], correct }（correct は labels にちょうど1つ含まれる）
+function genTargetRound() {
+  if (course === 'kids') {
+    if (Math.random() < 0.5) {
+      const c = pick(TARGET_KANA_KIDS);
+      return { prompt: `「${c}」を ねらえ！`, labels: makeChoices(c, TARGET_KANA_KIDS), correct: c };
+    }
+    const n = rand(1, 10);
+    return { prompt: `${n}を ねらえ！`, labels: numberChoices(n).map(String), correct: String(n) };
+  }
+  if (Math.random() < 0.5) {
+    const a = rand(2, 9), b = rand(2, 9);
+    return { prompt: `${a} × ${b} の こたえを ねらえ！`, labels: numberChoices(a * b).map(String), correct: String(a * b) };
+  }
+  const c = pick(TARGET_KANA_ELEM);
+  return { prompt: `「${c}」を ねらえ！`, labels: makeChoices(c, TARGET_KANA_ELEM), correct: c };
+}
+
+let targetState = null;
+
+function startTarget() {
+  targetState = { round: 0, lock: false, timer: null, current: null };
+  customCleanup = () => {
+    if (targetState && targetState.timer) clearTimeout(targetState.timer);
+    targetState = null;
+  };
+  renderTargetRound();
+}
+
+function renderTargetRound() {
+  const st = targetState;
+  if (!st) return;
+  st.lock = false;
+  const r = genTargetRound();
+  st.current = r;
+  $('#progress').textContent = `だい ${st.round + 1} もん ／ ${QUESTIONS_PER_SET} もん`;
+  $('#question').innerHTML = `<span class="prompt">🎯 まとあてアクション</span><span class="big-word">${r.prompt}</span>`;
+  setFeedback('', '');
+  const box = $('#choices');
+  box.className = 'choices stage-mode';
+  box.innerHTML = '';
+  const stage = document.createElement('div');
+  stage.className = 'target-stage';
+  const slots = shuffle([[5, 6], [55, 2], [28, 50], [72, 46]]);
+  r.labels.forEach((label, i) => {
+    const b = document.createElement('button');
+    b.className = 'target-bubble';
+    b.textContent = label;
+    b.style.left = `${slots[i][0]}%`;
+    b.style.top = `${slots[i][1]}%`;
+    b.style.animationDuration = `${(2.6 + Math.random() * 1.6).toFixed(2)}s`;
+    b.style.animationDelay = `${(Math.random() * 0.8).toFixed(2)}s`;
+    b.addEventListener('click', () => tapTarget(b, label));
+    stage.appendChild(b);
+  });
+  box.appendChild(stage);
+}
+
+function tapTarget(btn, label) {
+  const st = targetState;
+  if (!st || st.lock || btn.classList.contains('miss')) return;
+  if (label === st.current.correct) {
+    st.lock = true;
+    btn.classList.add('hit');
+    totalStars++;
+    earnedThisSet++;
+    saveStars();
+    soundCorrect();
+    setFeedback(`${pick(PRAISES)} スターを ゲット！`, 'good');
+    st.timer = setTimeout(() => {
+      if (targetState !== st) return; // 途中で離脱・再開していたら何もしない
+      st.round++;
+      if (st.round >= QUESTIONS_PER_SET) {
+        targetState = null;
+        finishCustomSet(
+          earnedThisSet === QUESTIONS_PER_SET
+            ? 'ぜんぶ あたった！かんぺきだね！🏆'
+            : `${QUESTIONS_PER_SET}もん おわったよ！`
+        );
+      } else {
+        renderTargetRound();
+      }
+    }, 1200);
+  } else {
+    btn.classList.add('miss');
+    btn.disabled = true;
+    soundTry();
+    setFeedback('おしい！ よく見て もういちど ねらってみよう💪', 'try');
+  }
+}
+
+/* ============ たからさがしアドベンチャー ============ */
+// マップ記号: S=スタート, C=かぎの宝箱, B=おたから宝箱, D=かぎ付きの扉, G=ゴール(⛩️), #=き(壁), .=みち
+// 流れ: 宝箱のクイズに正解して鍵を集め → 鍵で扉を開けて → 次のエリアへ → ゴール
+const TREASURE_MAPS = [
+  [
+    'S..#C.',
+    '.#.##.',
+    '.#.D..',
+    '.####.',
+    'C...DG',
+    '..B..#',
+  ],
+  [
+    'SC.#..',
+    '.#.##.',
+    '.#.DC.',
+    '.#####',
+    '..B.DG',
+    'C..#.#',
+  ],
+  [
+    'S.#C#C',
+    '..#.#.',
+    '#.D...',
+    '#.###.',
+    'C..DB#',
+    '.#.#DG',
+  ],
+];
+
+function parseTreasureMap(rows) {
+  const grid = rows.map((r) => r.split(''));
+  let start = null;
+  let goal = null;
+  const chests = [];
+  const doors = [];
+  grid.forEach((row, y) => row.forEach((c, x) => {
+    if (c === 'S') start = { x, y };
+    if (c === 'G') goal = { x, y };
+    if (c === 'C') chests.push({ x, y, kind: 'key', opened: false });
+    if (c === 'B') chests.push({ x, y, kind: 'bonus', opened: false });
+    if (c === 'D') doors.push({ x, y, opened: false });
+  }));
+  return { grid, start, goal, chests, doors };
+}
+
+let treasure = null;
+
+function startTreasure() {
+  const parsed = parseTreasureMap(pick(TREASURE_MAPS));
+  treasure = { ...parsed, px: parsed.start.x, py: parsed.start.y, busy: false, keys: 0 };
+  customCleanup = () => {
+    document.removeEventListener('keydown', treasureKeys);
+    treasure = null;
+  };
+  document.addEventListener('keydown', treasureKeys);
+  setFeedback('たからばこで かぎ🔑を あつめて、とびら🚪を あけながら ゴールを めざそう！', '');
+  renderTreasureMap();
+}
+
+function treasureKeys(e) {
+  if (!treasure || treasure.busy) return;
+  const dirs = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+  const d = dirs[e.key];
+  if (d) {
+    e.preventDefault();
+    treasureMove(d[0], d[1]);
+  }
+}
+
+function renderTreasureMap() {
+  const t = treasure;
+  if (!t) return;
+  const opened = t.chests.filter((c) => c.opened).length;
+  $('#progress').textContent = `🔑 かぎ ×${t.keys}　🎁 たからばこ ${opened}／${t.chests.length}`;
+  let cells = '';
+  for (let y = 0; y < t.grid.length; y++) {
+    for (let x = 0; x < t.grid[y].length; x++) {
+      const c = t.grid[y][x];
+      let cls = 'map-cell';
+      let content = '';
+      if (c === '#') { cls += ' wall'; content = '🌴'; }
+      else if (c === 'G') { cls += ' goal open'; content = '⛩️'; }
+      const door = t.doors.find((d) => d.x === x && d.y === y);
+      if (door) { cls += door.opened ? ' door-open' : ' door'; content = '🚪'; }
+      const chest = t.chests.find((ch) => ch.x === x && ch.y === y);
+      if (chest) content = chest.opened ? '🌟' : '🎁';
+      if (t.px === x && t.py === y) { cls += ' player'; content = '🧒'; }
+      cells += `<div class="${cls}">${content}</div>`;
+    }
+  }
+  $('#question').innerHTML =
+    `<span class="prompt">🗺️ かぎを あつめて とびらを あけ、ゴール（⛩️）を めざそう！</span><div class="map-grid">${cells}</div>`;
+  const box = $('#choices');
+  box.className = 'choices dpad-mode';
+  box.innerHTML =
+    `<div class="dpad">
+      <span></span><button class="dpad-btn" data-dx="0" data-dy="-1" aria-label="うえ">⬆️</button><span></span>
+      <button class="dpad-btn" data-dx="-1" data-dy="0" aria-label="ひだり">⬅️</button><span></span><button class="dpad-btn" data-dx="1" data-dy="0" aria-label="みぎ">➡️</button>
+      <span></span><button class="dpad-btn" data-dx="0" data-dy="1" aria-label="した">⬇️</button><span></span>
+    </div>`;
+  box.querySelectorAll('.dpad-btn').forEach((b) => {
+    b.addEventListener('click', () => treasureMove(parseInt(b.dataset.dx, 10), parseInt(b.dataset.dy, 10)));
+  });
+}
+
+function treasureMove(dx, dy) {
+  const t = treasure;
+  if (!t || t.busy) return;
+  const nx = t.px + dx;
+  const ny = t.py + dy;
+  if (ny < 0 || ny >= t.grid.length || nx < 0 || nx >= t.grid[ny].length) return;
+  const cell = t.grid[ny][nx];
+  if (cell === '#') {
+    soundTry();
+    setFeedback('🌴が あって すすめないよ。べつの みちを いってみよう', 'try');
+    return;
+  }
+  const door = t.doors.find((d) => d.x === nx && d.y === ny && !d.opened);
+  if (door) {
+    if (t.keys <= 0) {
+      soundTry();
+      setFeedback('🔒 この とびらは かぎが いるよ。たからばこを さがして かぎを てにいれよう！', 'try');
+      return;
+    }
+    t.keys--;
+    door.opened = true;
+    t.px = nx;
+    t.py = ny;
+    soundCorrect();
+    renderTreasureMap();
+    setFeedback(`🔑 かぎを つかって とびらを あけた！（かぎ のこり ×${t.keys}）`, 'good');
+    return;
+  }
+  t.px = nx;
+  t.py = ny;
+  tone(440, 0, 0.06, 'sine', 0.06);
+  const chest = t.chests.find((c) => c.x === nx && c.y === ny && !c.opened);
+  if (chest) {
+    openTreasureQuiz(chest);
+    return;
+  }
+  if (cell === 'G') {
+    finishTreasure();
+    return;
+  }
+  renderTreasureMap();
+}
+
+// 宝箱マスに着いたら、かず／もじのクイズを出す（既存ジェネレータを流用）
+function openTreasureQuiz(chest) {
+  const t = treasure;
+  t.busy = true;
+  const q = pick([GENERATORS.number, GENERATORS.moji])();
+  $('#question').innerHTML = `<span class="prompt">🎁 たからばこの クイズ！</span>` + q.html;
+  const box = $('#choices');
+  box.className = 'choices';
+  box.innerHTML = '';
+  q.choices.forEach((c) => {
+    const btn = document.createElement('button');
+    btn.className = 'choice-btn' + (q.emojiChoices ? ' emoji-choice' : '');
+    btn.textContent = c;
+    btn.addEventListener('click', () => treasureAnswer(btn, c, q, chest));
+    box.appendChild(btn);
+  });
+  setFeedback('クイズに こたえると たからばこが あくよ✨', '');
+}
+
+function treasureAnswer(btn, choice, q, chest) {
+  const t = treasure;
+  if (!t || btn.disabled) return;
+  if (choice === q.answer) {
+    chest.opened = true;
+    soundCorrect();
+    document.querySelectorAll('.choice-btn').forEach((b) => (b.disabled = true));
+    btn.classList.add('correct');
+    if (chest.kind === 'key') {
+      t.keys++;
+      setFeedback(`🔑 かぎを てにいれた！（かぎ ×${t.keys}）`, 'good');
+    } else {
+      totalStars++;
+      earnedThisSet++;
+      saveStars();
+      setFeedback(`${pick(PRAISES)} おたから💎と スターを ゲット！`, 'good');
+    }
+    setTimeout(() => {
+      if (treasure !== t) return; // 途中で離脱・再開していたら何もしない
+      t.busy = false;
+      renderTreasureMap();
+      if (chest.kind === 'key') {
+        setFeedback('かぎを つかえる とびら🚪を さがそう！', '');
+      } else {
+        setFeedback('つぎの たからばこを さがそう！', '');
+      }
+    }, 1300);
+  } else {
+    btn.classList.add('wrong');
+    btn.disabled = true;
+    soundTry();
+    setFeedback(`おしい！ヒント：${q.hint} もういちど やってみよう💪`, 'try');
+  }
+}
+
+function finishTreasure() {
+  const t = treasure;
+  const opened = t.chests.filter((c) => c.opened).length;
+  const extra = `（かぎ のこり ${t.keys}こ・たからばこ ${opened}／${t.chests.length} あけた）`;
+  treasure = null;
+  finishCustomSet('ゴール！ぼうけん クリア！🏆', extra);
+}
+
 /* ============ イベント ============ */
 document.querySelectorAll('.course-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -372,9 +980,9 @@ document.querySelectorAll('.game-card').forEach((card) => {
   card.addEventListener('click', () => startGame(card.dataset.game));
 });
 
-$('#back-btn').addEventListener('click', () => showScreen('screen-top'));
+$('#back-btn').addEventListener('click', () => { runCustomCleanup(); showScreen('screen-top'); });
 $('#retry-btn').addEventListener('click', () => startGame(currentGame));
-$('#home-btn').addEventListener('click', () => showScreen('screen-top'));
+$('#home-btn').addEventListener('click', () => { runCustomCleanup(); showScreen('screen-top'); });
 
 const muteBtn = $('#mute-btn');
 function refreshMute() { muteBtn.textContent = muted ? '🔇' : '🔊'; }
