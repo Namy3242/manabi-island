@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>まなびアイランド</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <span class="topbar-title">🏝️ まなびアイランド</span>
+  <span class="topbar-right">
+    <span class="star-count" title="あつめたスター">⭐ <span id="total-stars">0</span></span>
+    <button id="mute-btn" class="mute-btn" aria-label="おとの オン・オフ">🔊</button>
+  </span>
+</header>
+
+<main>
+  <!-- トップ画面 -->
+  <section id="screen-top" class="screen">
+    <h1 class="app-title">🏝️ まなびアイランド</h1>
+    <p class="subtitle">あそびながら まなぼう！</p>
+
+    <h2 class="section-label">コースを えらんでね</h2>
+    <div class="course-row">
+      <button id="course-kids" class="course-btn" data-course="kids">🐣 ようちえん<br><small>年中・年長向け</small></button>
+      <button id="course-elem" class="course-btn" data-course="elem">🎒 しょうがくせい<br><small>小1〜小3向け</small></button>
+    </div>
+
+    <h2 class="section-label">ゲームを えらんでね</h2>
+    <div class="game-grid">
+      <button class="game-card" data-game="number">
+        <span class="game-emoji">🍎</span>
+        <span class="game-name">かず・さんすう</span>
+        <span class="game-desc">かずを かぞえたり<br>けいさんしたり</span>
+      </button>
+      <button class="game-card" data-game="moji">
+        <span class="game-emoji">あ</span>
+        <span class="game-name">もじ</span>
+        <span class="game-desc">ひらがな・カタカナ・<br>かんじの よみかた</span>
+      </button>
+      <button class="game-card" data-game="clock">
+        <span class="game-emoji">🕐</span>
+        <span class="game-name">とけい</span>
+        <span class="game-desc">とけいを よんで<br>じこくを あてよう</span>
+      </button>
+    </div>
+
+    <p class="top-stars">あつめたスター ⭐ <span id="total-stars-top">0</span> こ</p>
+  </section>
+
+  <!-- ゲーム画面 -->
+  <section id="screen-game" class="screen hidden">
+    <div class="game-head">
+      <button id="back-btn" class="small-btn">← もどる</button>
+      <span id="progress" class="progress"></span>
+      <span class="star-count">⭐ <span id="game-stars">0</span></span>
+    </div>
+    <div id="question" class="question"></div>
+    <div id="choices" class="choices"></div>
+    <div id="feedback" class="feedback" aria-live="polite"></div>
+  </section>
+
+  <!-- 結果画面 -->
+  <section id="screen-result" class="screen hidden">
+    <h2 class="result-title">🎉 おつかれさま！</h2>
+    <p id="result-text" class="result-text"></p>
+    <p id="result-stars" class="result-stars"></p>
+    <div class="result-btns">
+      <button id="retry-btn" class="big-btn">🔁 もういちど</button>
+      <button id="home-btn" class="big-btn sub">🏠 トップへ</button>
+    </div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
