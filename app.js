@@ -397,31 +397,83 @@ function genTaruHeights() {
   return [[2, 3, 1], [1, 4, 2], [0, 2, 3]]; // 合計18・隠れる段あり
 }
 
-// 高さマップをSVGで描く。奥（r+c が小さい）→手前の順に描くので、樽が自然に隠れる
+// 高さマップを等角投影（アイソメトリック）SVGで描く。
+// 地面はひし形タイル（2:1）、樽は上面楕円＋側面＋たが（帯）を持つ円柱として描く。
+// 描画順は「奥のマス（r+c が小さい）→手前」「下の段→上の段」を守り、隠れる部分が自然に隠れる。
+// 樽の幅(54)よりマスの横間隔(76)が広く、高さ1段(30)より手前マスとの縦ずれ(19×2段分=38)が効くため、
+// 奥の柱は上面か側面上部が必ず少し見え、「柱がある」ことが読める寸法にしてある。
+const TARU_GEO = { hw: 38, hh: 19, rx: 27, ry: 13, bh: 30, ox: 160, oy: 148 };
+
+function taruBarrel(x, baseY, lv) {
+  const { rx, ry, bh } = TARU_GEO;
+  const botY = baseY - lv * bh; // この段の底面楕円の中心
+  const topY = botY - bh; // この段の上面楕円の中心
+  const odd = lv % 2 === 1; // 段ごとに色味を変えて境目を読みやすくする
+  let s = '';
+  // 側面（左が明るく右が濃いグラデーションで丸みを出す）
+  s += `<path d="M ${x - rx} ${topY} L ${x - rx} ${botY} A ${rx} ${ry} 0 0 0 ${x + rx} ${botY} L ${x + rx} ${topY} Z" fill="url(#taruWood)" stroke="#7a4a21" stroke-width="2" stroke-linejoin="round"/>`;
+  if (odd) {
+    s += `<path d="M ${x - rx} ${topY} L ${x - rx} ${botY} A ${rx} ${ry} 0 0 0 ${x + rx} ${botY} L ${x + rx} ${topY} Z" fill="#5a3413" opacity="0.10"/>`;
+  }
+  // 樽板（縦の板）の線
+  for (const off of [-12, 0, 12]) {
+    s += `<line x1="${x + off}" y1="${topY + 5}" x2="${x + off}" y2="${botY - 2}" stroke="#7a4a21" stroke-width="1.2" opacity="0.16"/>`;
+  }
+  // たが（胴の帯）1本：円柱の曲面に沿った弧で描く（本数が多いと段の境目と混ざるため1本に抑える）
+  for (const f of [0.52]) {
+    const hy = topY + bh * f;
+    s += `<path d="M ${x - rx} ${hy} A ${rx} ${ry} 0 0 0 ${x + rx} ${hy}" fill="none" stroke="#6e4520" stroke-width="2.6" opacity="0.75"/>`;
+  }
+  // 上面（ふた）：外側の楕円＋内側の楕円で厚みと輪郭をはっきりさせる
+  s += `<ellipse cx="${x}" cy="${topY}" rx="${rx}" ry="${ry}" fill="${odd ? '#e9bd7f' : '#f2cd97'}" stroke="#7a4a21" stroke-width="2"/>`;
+  s += `<ellipse cx="${x}" cy="${topY}" rx="${rx - 6}" ry="${ry - 3.5}" fill="none" stroke="#b9834a" stroke-width="1.6"/>`;
+  return s;
+}
+
 function taruSVG(h) {
-  const bw = 38, bh = 20, dx = 43, dy = 20, ox = 160, oy = 86;
+  const { hw, hh, ox, oy } = TARU_GEO;
   const cells = [];
   for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) cells.push({ r, c, v: h[r][c] });
-  cells.sort((a, b) => (a.r + a.c) - (b.r + b.c));
-  let s = '<svg class="taru-svg" viewBox="0 0 320 196" role="img" aria-label="つまれた たる">';
-  // 地面のマス目
+  cells.sort((a, b) => (a.r + a.c) - (b.r + b.c) || a.r - b.r);
+  let s = '<svg class="taru-svg" viewBox="0 0 320 258" role="img" aria-label="つまれた たる">';
+  s += '<defs><linearGradient id="taruWood" x1="0" y1="0" x2="1" y2="0">'
+    + '<stop offset="0" stop-color="#dfa860"/><stop offset="0.45" stop-color="#c98a46"/>'
+    + '<stop offset="1" stop-color="#9c652c"/></linearGradient></defs>';
+  // 地面のひし形タイル（市松模様で1マスずつ追えるようにする）
   for (const { r, c } of cells) {
-    const x = ox + (c - r) * dx;
-    const y = oy + (r + c) * dy;
-    s += `<polygon points="${x},${y - 11} ${x + 22},${y} ${x},${y + 11} ${x - 22},${y}" fill="#ffe9b8" stroke="#f0d48a"/>`;
+    const x = ox + (c - r) * hw;
+    const y = oy + (r + c) * hh;
+    const fill = (r + c) % 2 === 0 ? '#c2e3a3' : '#add693';
+    s += `<polygon points="${x},${y - hh} ${x + hw},${y} ${x},${y + hh} ${x - hw},${y}" fill="${fill}" stroke="#7cb35e" stroke-width="1.5"/>`;
   }
-  // 樽（マスごと下から上へ）
+  // 樽の柱（マスごと：影→下の段から上の段へ）
   for (const { r, c, v } of cells) {
-    const x = ox + (c - r) * dx;
-    const yBase = oy + (r + c) * dy;
-    for (let lv = 0; lv < v; lv++) {
-      const topY = yBase - (lv + 1) * bh;
-      s += `<rect x="${x - bw / 2}" y="${topY + 6}" width="${bw}" height="${bh - 6}" fill="#d98e4a" stroke="#a05e2c" stroke-width="1.5"/>`;
-      s += `<rect x="${x + bw / 6}" y="${topY + 6}" width="${bw / 3}" height="${bh - 6}" fill="#b96f35" opacity="0.35"/>`;
-      s += `<line x1="${x - bw / 2}" y1="${topY + 13}" x2="${x + bw / 2}" y2="${topY + 13}" stroke="#a05e2c" stroke-width="1.5" opacity="0.55"/>`;
-      s += `<ellipse cx="${x}" cy="${topY + 6}" rx="${bw / 2}" ry="6" fill="#f2bc7d" stroke="#a05e2c" stroke-width="1.5"/>`;
+    if (v === 0) continue;
+    const x = ox + (c - r) * hw;
+    const yBase = oy + (r + c) * hh;
+    s += `<ellipse cx="${x}" cy="${yBase + 5}" rx="31" ry="10" fill="#3d6027" opacity="0.28"/>`;
+    for (let lv = 0; lv < v; lv++) s += taruBarrel(x, yBase, lv);
+  }
+  return s + '</svg>';
+}
+
+// ヒント用：真上から見たマップ（各マスの段数を数字で表示）。r=0 が奥、r=2 が手前
+function taruTopSVG(h) {
+  const fills = ['#eef7e2', '#f7dfae', '#f2c879', '#eaa84f', '#dd8f33'];
+  let s = '<svg class="taru-top-svg" viewBox="0 0 156 178" role="img" aria-label="うえから みた たるの マップ">';
+  s += '<text x="78" y="14" text-anchor="middle" font-size="12" font-weight="bold" fill="#5b7a43">おく</text>';
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const v = h[r][c];
+      const x = 4 + c * 50;
+      const y = 20 + r * 50;
+      s += `<rect x="${x}" y="${y}" width="46" height="46" rx="8" fill="${fills[v]}" stroke="#7cb35e" stroke-width="1.5"/>`;
+      s += v > 0
+        ? `<text x="${x + 23}" y="${y + 31}" text-anchor="middle" font-size="24" font-weight="bold" fill="#6b4420">${v}</text>`
+        : `<text x="${x + 23}" y="${y + 30}" text-anchor="middle" font-size="16" fill="#9db98a">・</text>`;
     }
   }
+  s += '<text x="78" y="174" text-anchor="middle" font-size="12" font-weight="bold" fill="#5b7a43">てまえ</text>';
   return s + '</svg>';
 }
 
@@ -429,10 +481,22 @@ function qTaru() {
   const h = genTaruHeights();
   const total = h.flat().reduce((a, b) => a + b, 0);
   return {
-    html: `<span class="prompt">たるは ぜんぶで いくつ？</span>${taruSVG(h)}<span class="prompt">かくれている たるも かぞえよう！</span>`,
+    html: `<span class="prompt">たるは ぜんぶで いくつ？</span>${taruSVG(h)}`
+      + '<button type="button" class="taru-hint-btn">🗺️ ヒント：うえから みる</button>'
+      + `<div class="taru-topview" hidden>${taruTopSVG(h)}<span class="taru-top-cap">すうじは そのマスの たるの かずだよ</span></div>`
+      + '<span class="prompt">かくれている たるも かぞえよう！</span>',
     choices: numberChoices(total).map(String),
     answer: String(total),
     hint: 'マスごとに、下から つみあがっている たるを かぞえて、ぜんぶ たしてみよう。',
+    onRender: () => {
+      const btn = document.querySelector('.taru-hint-btn');
+      const view = document.querySelector('.taru-topview');
+      if (!btn || !view) return;
+      btn.addEventListener('click', () => {
+        view.hidden = !view.hidden;
+        btn.textContent = view.hidden ? '🗺️ ヒント：うえから みる' : '🗺️ ヒントを かくす';
+      });
+    },
     testMeta: { heights: h, total },
   };
 }
@@ -597,6 +661,7 @@ function renderQuestion() {
     btn.addEventListener('click', () => answer(btn, c));
     box.appendChild(btn);
   });
+  if (q.onRender) q.onRender();
 }
 
 function answer(btn, choice) {
