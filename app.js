@@ -372,18 +372,50 @@ function taruHiddenExists(h) {
   return false;
 }
 
+// 積み方のルール（階段ルール）: 同じ斜め列（c-r が同じ＝等角投影で同じ画面列に並ぶマス同士）では、
+// 奥（r が小さい）ほど段数が多いか同じになる積み方だけを出す。
+// 手前の柱が高いと奥の柱の天面が隠れて数えられないため、奥→手前に向かって段数が増えない形に限定し、
+// 全ての柱の天面（上面楕円）が必ず見えるようにする。
+// 並べ替えは斜め列ごとの段数の合計を変えないので、コース別の総数範囲はそのまま保たれる。
+function taruApplyStairs(h) {
+  for (let d = -2; d <= 2; d++) {
+    const cells = [];
+    for (let r = 0; r < 3; r++) {
+      const c = r + d;
+      if (c >= 0 && c < 3) cells.push([r, c]);
+    }
+    const vals = cells.map(([r, c]) => h[r][c]).sort((a, b) => b - a); // 奥→手前へ降順
+    cells.forEach(([r, c], i) => { h[r][c] = vals[i]; });
+  }
+  return h;
+}
+
+function taruStairsOk(h) {
+  for (let d = -2; d <= 2; d++) {
+    let prev = Infinity;
+    for (let r = 0; r < 3; r++) {
+      const c = r + d;
+      if (c < 0 || c > 2) continue;
+      if (h[r][c] > prev) return false;
+      prev = h[r][c];
+    }
+  }
+  return true;
+}
+
 function genTaruHeights() {
   const empty = () => [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
   if (course === 'kids') {
-    for (let tries = 0; tries < 200; tries++) {
+    for (let tries = 0; tries < 500; tries++) {
       const h = empty();
       for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) h[r][c] = Math.random() < 0.45 ? rand(1, 2) : 0;
+      taruApplyStairs(h);
       const total = h.flat().reduce((a, b) => a + b, 0);
-      if (total >= 4 && total <= 10 && h.flat().some((v) => v === 2)) return h;
+      if (total >= 4 && total <= 10 && h.flat().some((v) => v === 2) && taruStairsOk(h)) return h;
     }
-    return [[1, 2, 0], [0, 1, 2], [1, 0, 1]]; // 合計8
+    return [[1, 2, 0], [0, 1, 2], [1, 0, 1]]; // 合計8・階段ルール適合
   }
-  for (let tries = 0; tries < 300; tries++) {
+  for (let tries = 0; tries < 1000; tries++) {
     const h = empty();
     for (let r = 0; r < 3; r++) {
       for (let c = 0; c < 3; c++) {
@@ -391,10 +423,11 @@ function genTaruHeights() {
         h[r][c] = x < 0.25 ? 0 : x < 0.55 ? 1 : x < 0.8 ? 2 : x < 0.93 ? 3 : 4;
       }
     }
+    taruApplyStairs(h);
     const total = h.flat().reduce((a, b) => a + b, 0);
-    if (total >= 12 && total <= 20 && Math.max(...h.flat()) >= 3 && taruHiddenExists(h)) return h;
+    if (total >= 12 && total <= 20 && Math.max(...h.flat()) >= 3 && taruHiddenExists(h) && taruStairsOk(h)) return h;
   }
-  return [[2, 3, 1], [1, 4, 2], [0, 2, 3]]; // 合計18・隠れる段あり
+  return [[3, 3, 1], [2, 3, 2], [1, 2, 2]]; // 合計19・隠れる段あり・階段ルール適合
 }
 
 // 高さマップを等角投影（アイソメトリック）SVGで描く。
