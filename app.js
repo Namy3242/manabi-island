@@ -431,13 +431,15 @@ function genTaruHeights() {
 }
 
 // 高さマップを等角投影（アイソメトリック）SVGで描く。
-// 地面はひし形タイル（2:1）、樽は上面楕円＋側面＋たが（帯）を持つ円柱として描く。
+// 地面はひし形タイル（2:1）、樽は上面楕円＋側面を持つ円柱として描く。
+// 胴には帯（たが）などの横線を入れない（1個の樽が2つに割れて見えるため）。
+// 段の境目は、上の段の底面の輪郭線と、その樽が下の樽に落とす柔らかい影で示す。
 // 描画順は「奥のマス（r+c が小さい）→手前」「下の段→上の段」を守り、隠れる部分が自然に隠れる。
 // 樽の幅(54)よりマスの横間隔(76)が広く、高さ1段(30)より手前マスとの縦ずれ(19×2段分=38)が効くため、
 // 奥の柱は上面か側面上部が必ず少し見え、「柱がある」ことが読める寸法にしてある。
 const TARU_GEO = { hw: 38, hh: 19, rx: 27, ry: 13, bh: 30, ox: 160, oy: 148 };
 
-function taruBarrel(x, baseY, lv) {
+function taruBarrel(x, baseY, lv, hasAbove) {
   const { rx, ry, bh } = TARU_GEO;
   const botY = baseY - lv * bh; // この段の底面楕円の中心
   const topY = botY - bh; // この段の上面楕円の中心
@@ -448,14 +450,14 @@ function taruBarrel(x, baseY, lv) {
   if (odd) {
     s += `<path d="M ${x - rx} ${topY} L ${x - rx} ${botY} A ${rx} ${ry} 0 0 0 ${x + rx} ${botY} L ${x + rx} ${topY} Z" fill="#5a3413" opacity="0.10"/>`;
   }
+  // 上の段の樽が落とす影：接触部のすぐ下に、輪郭線ではなく放射グラデーションで
+  // ふちが透明に消える柔らかい影として描く（胴の途中に横線は入れない）
+  if (hasAbove) {
+    s += `<ellipse cx="${x}" cy="${topY + ry + 2}" rx="${rx - 1}" ry="10" fill="url(#taruShade)"/>`;
+  }
   // 樽板（縦の板）の線
   for (const off of [-12, 0, 12]) {
     s += `<line x1="${x + off}" y1="${topY + 5}" x2="${x + off}" y2="${botY - 2}" stroke="#7a4a21" stroke-width="1.2" opacity="0.16"/>`;
-  }
-  // たが（胴の帯）1本：円柱の曲面に沿った弧で描く（本数が多いと段の境目と混ざるため1本に抑える）
-  for (const f of [0.52]) {
-    const hy = topY + bh * f;
-    s += `<path d="M ${x - rx} ${hy} A ${rx} ${ry} 0 0 0 ${x + rx} ${hy}" fill="none" stroke="#6e4520" stroke-width="2.6" opacity="0.75"/>`;
   }
   // 上面（ふた）：外側の楕円＋内側の楕円で厚みと輪郭をはっきりさせる
   s += `<ellipse cx="${x}" cy="${topY}" rx="${rx}" ry="${ry}" fill="${odd ? '#e9bd7f' : '#f2cd97'}" stroke="#7a4a21" stroke-width="2"/>`;
@@ -471,7 +473,11 @@ function taruSVG(h) {
   let s = '<svg class="taru-svg" viewBox="0 0 320 258" role="img" aria-label="つまれた たる">';
   s += '<defs><linearGradient id="taruWood" x1="0" y1="0" x2="1" y2="0">'
     + '<stop offset="0" stop-color="#dfa860"/><stop offset="0.45" stop-color="#c98a46"/>'
-    + '<stop offset="1" stop-color="#9c652c"/></linearGradient></defs>';
+    + '<stop offset="1" stop-color="#9c652c"/></linearGradient>'
+    + '<radialGradient id="taruShade">'
+    + '<stop offset="0" stop-color="#3a2008" stop-opacity="0.30"/>'
+    + '<stop offset="0.65" stop-color="#3a2008" stop-opacity="0.14"/>'
+    + '<stop offset="1" stop-color="#3a2008" stop-opacity="0"/></radialGradient></defs>';
   // 地面のひし形タイル（市松模様で1マスずつ追えるようにする）
   for (const { r, c } of cells) {
     const x = ox + (c - r) * hw;
@@ -485,7 +491,7 @@ function taruSVG(h) {
     const x = ox + (c - r) * hw;
     const yBase = oy + (r + c) * hh;
     s += `<ellipse cx="${x}" cy="${yBase + 5}" rx="31" ry="10" fill="#3d6027" opacity="0.28"/>`;
-    for (let lv = 0; lv < v; lv++) s += taruBarrel(x, yBase, lv);
+    for (let lv = 0; lv < v; lv++) s += taruBarrel(x, yBase, lv, lv + 1 < v);
   }
   return s + '</svg>';
 }
