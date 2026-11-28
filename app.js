@@ -679,6 +679,9 @@ function startGame(game) {
   showScreen('screen-game');
   if (game === 'treasure') { startTreasure(); return; }
   if (game === 'target') { startTarget(); return; }
+  if (game === 'memory') { startMemory(); return; }
+  if (game === 'fishing') { startFishing(); return; }
+  if (game === 'balance') { startBalance(); return; }
   questions = Array.from({ length: QUESTIONS_PER_SET }, () => GENERATORS[game]());
   renderQuestion();
 }
@@ -1063,6 +1066,467 @@ function finishTreasure() {
   const extra = `（かぎ のこり ${t.keys}こ・たからばこ ${opened}／${t.chests.length} あけた）`;
   treasure = null;
   finishCustomSet('ゴール！ぼうけん クリア！🏆', extra);
+}
+
+/* ============ めもりーカード（神経衰弱） ============ */
+// ペア生成（純粋関数寄り・検証可能）: 戻り値 { total, deck:[{pair, kind, label}] }
+// deck はシャッフル済みで、各 pair はちょうど2枚（対応する2種のカード）
+// ようちえん: ひらがなカード ⇔ その文字で始まる絵カード（MOJI_KIDS と整合、かなは重複させない）
+// しょうがくせい: 九九の式カード ⇔ 答えカード（積が重複しない式だけを採用し、対応を一意にする）
+function genMemoryDeck() {
+  if (course === 'kids') {
+    const usedKana = new Set();
+    const items = [];
+    for (const m of shuffle(MOJI_KIDS)) {
+      if (items.length >= 6) break;
+      if (usedKana.has(m[2])) continue;
+      usedKana.add(m[2]);
+      items.push(m);
+    }
+    const deck = [];
+    items.forEach(([, emoji, kana], i) => {
+      deck.push({ pair: i, kind: 'kana', label: kana });
+      deck.push({ pair: i, kind: 'emoji', label: emoji });
+    });
+    return { total: items.length, deck: shuffle(deck) };
+  }
+  const usedProduct = new Set();
+  const pairs = [];
+  const combos = [];
+  for (let a = 2; a <= 9; a++) for (let b = 2; b <= 9; b++) combos.push([a, b]);
+  for (const [a, b] of shuffle(combos)) {
+    if (pairs.length >= 8) break;
+    const p = a * b;
+    if (usedProduct.has(p)) continue;
+    usedProduct.add(p);
+    pairs.push([a, b, p]);
+  }
+  const deck = [];
+  pairs.forEach(([a, b, p], i) => {
+    deck.push({ pair: i, kind: 'formula', label: `${a}×${b}` });
+    deck.push({ pair: i, kind: 'answer', label: String(p) });
+  });
+  return { total: pairs.length, deck: shuffle(deck) };
+}
+
+let memoryState = null;
+
+function startMemory() {
+  const { total, deck } = genMemoryDeck();
+  memoryState = { total, deck, open: [], matched: new Set(), lock: false, flips: 0, timer: null };
+  customCleanup = () => {
+    if (memoryState && memoryState.timer) clearTimeout(memoryState.timer);
+    memoryState = null;
+  };
+  renderMemory();
+  setFeedback('カードを めくって、同じ ペアを さがしてね！', '');
+}
+
+function renderMemory() {
+  const st = memoryState;
+  if (!st) return;
+  $('#progress').textContent = `ペア ${st.matched.size}／${st.total}`;
+  let cards = '';
+  st.deck.forEach((card, i) => {
+    const up = st.matched.has(card.pair) || st.open.includes(i);
+    const cls = 'memory-card' + (up ? ' up' : '') + (st.matched.has(card.pair) ? ' matched' : '')
+      + (card.label.length >= 3 ? ' long' : '');
+    cards += `<button class="${cls}" data-idx="${i}">${up ? card.label : '🏝️'}</button>`;
+  });
+  $('#question').innerHTML =
+    `<span class="prompt">🃏 めもりーカード：同じ ペアを さがそう！</span><div class="memory-grid">${cards}</div>`;
+  const box = $('#choices');
+  box.className = 'choices stage-mode';
+  box.innerHTML = '';
+  $('#question').querySelectorAll('.memory-card').forEach((b) => {
+    b.addEventListener('click', () => flipMemoryCard(parseInt(b.dataset.idx, 10)));
+  });
+}
+
+function flipMemoryCard(idx) {
+  const st = memoryState;
+  if (!st || st.lock) return;
+  const card = st.deck[idx];
+  if (st.matched.has(card.pair) || st.open.includes(idx)) return;
+  st.open.push(idx);
+  st.flips++;
+  tone(520, 0, 0.07, 'sine', 0.07);
+  renderMemory();
+  if (st.open.length < 2) return;
+  const [i, j] = st.open;
+  if (st.deck[i].pair === st.deck[j].pair) {
+    st.matched.add(card.pair);
+    st.open = [];
+    totalStars++;
+    earnedThisSet++;
+    saveStars();
+    soundCorrect();
+    renderMemory();
+    if (st.matched.size === st.total) {
+      st.lock = true;
+      setFeedback('全部の ペアが そろった！🎉', 'good');
+      st.timer = setTimeout(() => {
+        if (memoryState !== st) return;
+        memoryState = null;
+        finishCustomSet('全部の ペアが そろった！クリア！🏆', `（カードを めくった回数：${st.flips}回）`);
+      }, 1300);
+    } else {
+      setFeedback(`${pick(PRAISES)} スターを ゲット！`, 'good');
+    }
+  } else {
+    st.lock = true;
+    soundTry();
+    setFeedback('ちがう ペアだよ。場所を おぼえて もういちど！', 'try');
+    st.timer = setTimeout(() => {
+      if (memoryState !== st) return;
+      st.open = [];
+      st.lock = false;
+      renderMemory();
+    }, 950);
+  }
+}
+
+/* ============ つりたいかい（フィッシング） ============ */
+// 条件判定（検証用に分離）: ようちえんの数条件
+function fishingKidsTest(cond, n) {
+  if (cond.kind === 'bigger') return n > cond.t;
+  if (cond.kind === 'smaller') return n < cond.t;
+  if (cond.kind === 'even') return n % 2 === 0;
+  return n % 2 === 1; // odd
+}
+
+// ラウンド生成（純粋関数寄り・検証可能）: 戻り値 { prompt, cond, fish:[{label, match}] }
+// 条件に合う魚は必ず2〜3匹。cond は機械検証用（{kind:'bigger'|'smaller'|'even'|'odd', t} /
+// {kind:'mult', base} / {kind:'formula', op:'mul'|'add', target}）
+function genFishingRound() {
+  if (course === 'kids') {
+    const type = pick(['bigger', 'smaller', 'even', 'odd']);
+    let prompt, cond;
+    // しきい値は、該当・非該当どちらも4以上残る範囲にする（魚5〜6匹・該当2〜3匹を必ず作れる）
+    if (type === 'bigger') { const t = rand(4, 6); cond = { kind: 'bigger', t }; prompt = `${t}より 大きい かずの さかなを 全部 つろう！`; }
+    else if (type === 'smaller') { const t = rand(5, 7); cond = { kind: 'smaller', t }; prompt = `${t}より 小さい かずの さかなを 全部 つろう！`; }
+    else if (type === 'even') { cond = { kind: 'even' }; prompt = 'ぐうすう（2・4・6・8・10）の さかなを 全部 つろう！'; }
+    else { cond = { kind: 'odd' }; prompt = 'きすう（1・3・5・7・9）の さかなを 全部 つろう！'; }
+    const test = (n) => fishingKidsTest(cond, n);
+    const all = shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const yes = all.filter(test);
+    const no = all.filter((n) => !test(n));
+    const need = rand(2, 3);
+    const count = rand(5, 6);
+    const nums = shuffle([...yes.slice(0, need), ...no.slice(0, count - need)]);
+    return { prompt, cond, fish: nums.map((n) => ({ label: String(n), match: test(n) })) };
+  }
+  if (Math.random() < 0.5) {
+    // 倍数
+    const base = pick([2, 3, 4, 5, 6, 7, 8, 9]);
+    const cond = { kind: 'mult', base };
+    const mults = shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9].map((k) => base * k));
+    const nonPool = shuffle(Array.from({ length: 68 }, (_, i) => i + 3).filter((n) => n % base !== 0));
+    const need = rand(2, 3);
+    const nums = shuffle([...mults.slice(0, need), ...nonPool.slice(0, 6 - need)]);
+    return {
+      prompt: `${base}の ばいすうの さかなを 全部 つろう！`,
+      cond,
+      fish: nums.map((n) => ({ label: String(n), match: n % base === 0 })),
+    };
+  }
+  // 答えが目標になる式
+  if (Math.random() < 0.5) {
+    const byProduct = new Map();
+    for (let a = 2; a <= 9; a++) for (let b = 2; b <= 9; b++) {
+      const p = a * b;
+      if (!byProduct.has(p)) byProduct.set(p, []);
+      byProduct.get(p).push(`${a}×${b}`);
+    }
+    // 同じ答えになる式が3つ以上ある積だけを狙う（該当魚を2〜3匹そろえられる）
+    const targets = [...byProduct.entries()].filter(([, list]) => list.length >= 3);
+    const [target, formulas] = pick(targets);
+    const need = rand(2, 3);
+    const matchLabels = shuffle(formulas).slice(0, need);
+    const others = [];
+    byProduct.forEach((list, p) => { if (p !== target) others.push(...list); });
+    const nonLabels = shuffle(others).slice(0, 6 - need);
+    return {
+      prompt: `答えが ${target} に なる 式の さかなを 全部 つろう！`,
+      cond: { kind: 'formula', op: 'mul', target },
+      fish: shuffle([
+        ...matchLabels.map((label) => ({ label, match: true })),
+        ...nonLabels.map((label) => ({ label, match: false })),
+      ]),
+    };
+  }
+  const target = rand(10, 30);
+  const pairs = [];
+  for (let a = 2; a <= target - 2; a++) pairs.push(`${a}＋${target - a}`);
+  const need = rand(2, 3);
+  const matchLabels = shuffle(pairs).slice(0, need);
+  const used = new Set(matchLabels);
+  const nonLabels = [];
+  while (nonLabels.length < 6 - need) {
+    const a = rand(2, 30), b = rand(2, 30);
+    if (a + b === target) continue;
+    const label = `${a}＋${b}`;
+    if (used.has(label)) continue;
+    used.add(label);
+    nonLabels.push(label);
+  }
+  return {
+    prompt: `答えが ${target} に なる 式の さかなを 全部 つろう！`,
+    cond: { kind: 'formula', op: 'add', target },
+    fish: shuffle([
+      ...matchLabels.map((label) => ({ label, match: true })),
+      ...nonLabels.map((label) => ({ label, match: false })),
+    ]),
+  };
+}
+
+const FISH_SLOTS = [[3, 8], [36, 3], [68, 9], [9, 55], [42, 58], [71, 52]];
+const FISH_EMOJIS = ['🐟', '🐠', '🐡', '🐟', '🐠', '🐡'];
+let fishingState = null;
+
+function startFishing() {
+  fishingState = { round: 0, lock: false, timer: null, current: null, left: 0 };
+  customCleanup = () => {
+    if (fishingState && fishingState.timer) clearTimeout(fishingState.timer);
+    fishingState = null;
+  };
+  renderFishingRound();
+}
+
+function renderFishingRound() {
+  const st = fishingState;
+  if (!st) return;
+  st.lock = false;
+  const r = genFishingRound();
+  st.current = r;
+  st.left = r.fish.filter((f) => f.match).length;
+  $('#progress').textContent = `だい ${st.round + 1} もん ／ ${QUESTIONS_PER_SET} もん`;
+  $('#question').innerHTML = `<span class="prompt">🎣 つりたいかい</span><span class="big-word">${r.prompt}</span>`;
+  setFeedback(`お題に 合う さかなは ${st.left} ひき いるよ。全部 つろう！`, '');
+  const box = $('#choices');
+  box.className = 'choices stage-mode';
+  box.innerHTML = '';
+  const stage = document.createElement('div');
+  stage.className = 'target-stage sea-stage';
+  r.fish.forEach((f, i) => {
+    const b = document.createElement('button');
+    b.className = 'fish-btn';
+    b.innerHTML = `<span class="fish-emoji">${FISH_EMOJIS[i % FISH_EMOJIS.length]}</span><span class="fish-label">${f.label}</span>`;
+    b.style.left = `${FISH_SLOTS[i][0]}%`;
+    b.style.top = `${FISH_SLOTS[i][1]}%`;
+    b.style.animationDuration = `${(2.2 + Math.random() * 1.8).toFixed(2)}s`;
+    b.style.animationDelay = `${(Math.random() * 0.9).toFixed(2)}s`;
+    b.addEventListener('click', () => tapFish(b, f));
+    stage.appendChild(b);
+  });
+  box.appendChild(stage);
+}
+
+function tapFish(btn, f) {
+  const st = fishingState;
+  if (!st || st.lock || btn.classList.contains('caught')) return;
+  if (f.match) {
+    btn.classList.add('caught');
+    btn.disabled = true;
+    st.left--;
+    tone(880, 0, 0.1, 'sine', 0.12);
+    tone(1175, 0.09, 0.16, 'sine', 0.12);
+    if (st.left > 0) {
+      setFeedback(`つれた！🎣 あと ${st.left} ひき`, 'good');
+      return;
+    }
+    st.lock = true;
+    totalStars++;
+    earnedThisSet++;
+    saveStars();
+    soundCorrect();
+    setFeedback(`${pick(PRAISES)} スターを ゲット！`, 'good');
+    st.timer = setTimeout(() => {
+      if (fishingState !== st) return;
+      st.round++;
+      if (st.round >= QUESTIONS_PER_SET) {
+        fishingState = null;
+        finishCustomSet(
+          earnedThisSet === QUESTIONS_PER_SET
+            ? '全部の お題を クリア！かんぺきだね！🏆'
+            : `${QUESTIONS_PER_SET}もん おわったよ！`
+        );
+      } else {
+        renderFishingRound();
+      }
+    }, 1200);
+  } else {
+    btn.classList.add('wrongfish');
+    soundTry();
+    setFeedback('ちがうよ！その さかなは お題に 合わないよ。よく見て もういちど！', 'try');
+    setTimeout(() => btn.classList.remove('wrongfish'), 650);
+  }
+}
+
+/* ============ てんびんマスター ============ */
+// 問題生成（純粋関数寄り・検証可能）: 戻り値 { target, targetLabel, weights:[{value, label}] }
+// ようちえん: 右の皿は絵の個数（＝重さ）。手持ちは 1〜5 のおもり各1個（部分和で 0〜15 全部作れる）
+// しょうがくせい: 目標は2桁。先に「解になる組み合わせ」を作ってから外れのおもりを足すので到達可能が保証される
+function genBalanceQuestion() {
+  if (course === 'kids') {
+    const target = rand(3, 9);
+    const emoji = pick(['🍎', '🍊', '🍓', '🍌', '🍑', '🍇']);
+    return {
+      target,
+      targetLabel: emoji.repeat(target),
+      weights: shuffle([1, 2, 3, 4, 5]).map((v) => ({ value: v, label: String(v) })),
+    };
+  }
+  const target = rand(13, 58);
+  const sol = [];
+  let rest = target;
+  while (rest >= 20) { sol.push(20); rest -= 20; }
+  if (rest >= 10) { sol.push(10); rest -= 10; }
+  if (rest >= 5) { sol.push(5); rest -= 5; }
+  if (rest > 0) { sol.push(rest); rest = 0; }
+  const values = sol.slice();
+  for (const d of shuffle([1, 2, 3, 4, 5, 10])) {
+    if (values.length >= sol.length + 3) break;
+    values.push(d);
+  }
+  return {
+    target,
+    targetLabel: String(target),
+    weights: shuffle(values).map((v) => ({ value: v, label: String(v) })),
+  };
+}
+
+// 皿の上のおもり（丸チップ＋数字）をSVG文字列にする
+function panChipsSVG(cx, dishY, values) {
+  let s = '';
+  values.forEach((v, i) => {
+    const row = Math.floor(i / 4);
+    const col = i % 4;
+    const inRow = Math.min(values.length - row * 4, 4);
+    const x = cx + (col - (inRow - 1) / 2) * 23;
+    const y = dishY - 16 - row * 21;
+    s += `<circle cx="${x}" cy="${y}" r="10.5" fill="#ffd93d" stroke="#b8860b" stroke-width="1.6"/>`;
+    s += `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="10.5" font-weight="bold" fill="#5c4303">${v}</text>`;
+  });
+  return s;
+}
+
+// 天秤のSVG。左が重いと左へ、右が重いと右へ傾く。釣り合うと水平＋✨表示
+function balanceSVG(q, leftValues) {
+  const leftSum = leftValues.reduce((a, b) => a + b, 0);
+  const diff = leftSum - q.target;
+  const ang = Math.max(-13, Math.min(13, -diff * 2.4));
+  const beamStyle = `transform: rotate(${ang}deg); transform-origin: 160px 56px;`;
+  const panLStyle = `transform: rotate(${-ang}deg); transform-origin: 46px 56px;`;
+  const panRStyle = `transform: rotate(${-ang}deg); transform-origin: 274px 56px;`;
+  return `<svg class="balance-svg" viewBox="0 0 320 196" role="img" aria-label="てんびん">
+    <line x1="18" y1="182" x2="302" y2="182" stroke="#8a6d3b" stroke-width="4" stroke-linecap="round"/>
+    <polygon points="160,66 138,182 182,182" fill="#c98a46" stroke="#7a4a21" stroke-width="2" stroke-linejoin="round"/>
+    <g class="beam" style="${beamStyle}">
+      <rect x="26" y="50" width="268" height="12" rx="6" fill="#a9713a" stroke="#7a4a21" stroke-width="2"/>
+      <g class="pan" style="${panLStyle}">
+        <line x1="46" y1="56" x2="24" y2="104" stroke="#7a4a21" stroke-width="2"/>
+        <line x1="46" y1="56" x2="68" y2="104" stroke="#7a4a21" stroke-width="2"/>
+        <path d="M 8 104 A 38 12 0 0 0 84 104 Z" fill="#74c0fc" stroke="#3f7fbf" stroke-width="2"/>
+        ${panChipsSVG(46, 104, leftValues)}
+      </g>
+      <g class="pan" style="${panRStyle}">
+        <line x1="274" y1="56" x2="252" y2="104" stroke="#7a4a21" stroke-width="2"/>
+        <line x1="274" y1="56" x2="296" y2="104" stroke="#7a4a21" stroke-width="2"/>
+        <path d="M 236 104 A 38 12 0 0 0 312 104 Z" fill="#ffa8a8" stroke="#c26060" stroke-width="2"/>
+        ${panChipsSVG(274, 104, [q.target])}
+      </g>
+    </g>
+    <circle cx="160" cy="56" r="8" fill="#7a4a21"/>
+    ${diff === 0 ? '<text x="160" y="30" text-anchor="middle" font-size="20" font-weight="bold" fill="#2b8a3e">✨ つりあった！ ✨</text>' : ''}
+  </svg>`;
+}
+
+let balanceState = null;
+
+function startBalance() {
+  balanceState = {
+    idx: 0,
+    questions: Array.from({ length: QUESTIONS_PER_SET }, () => genBalanceQuestion()),
+    placed: new Set(),
+    lock: false,
+    timer: null,
+    leftSum: 0,
+  };
+  customCleanup = () => {
+    if (balanceState && balanceState.timer) clearTimeout(balanceState.timer);
+    balanceState = null;
+  };
+  renderBalance();
+  setFeedback('おもりを タップすると 左の お皿に のるよ。もういちど タップすると はずれるよ', '');
+}
+
+function renderBalance() {
+  const st = balanceState;
+  if (!st) return;
+  const q = st.questions[st.idx];
+  const leftValues = [...st.placed].map((i) => q.weights[i].value);
+  st.leftSum = leftValues.reduce((a, b) => a + b, 0);
+  $('#progress').textContent = `だい ${st.idx + 1} もん ／ ${QUESTIONS_PER_SET} もん`;
+  const rightInfo = course === 'kids'
+    ? `<span class="seq">みぎの お皿： ${q.targetLabel}（おもさ ${q.target}）</span>`
+    : `<span class="seq">みぎの お皿の おもさは ${q.target}</span>`;
+  $('#question').innerHTML =
+    `<span class="prompt">⚖️ てんびんマスター：左と 右を 同じ おもさに しよう！</span>` +
+    rightInfo +
+    balanceSVG(q, leftValues) +
+    `<span class="seq">ひだりの お皿： あわせて ${st.leftSum}</span>`;
+  const box = $('#choices');
+  box.className = 'choices balance-chips';
+  box.innerHTML = '';
+  q.weights.forEach((w, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'choice-btn weight-chip' + (st.placed.has(i) ? ' placed' : '');
+    btn.textContent = st.placed.has(i) ? `✓ ${w.label}` : w.label;
+    btn.addEventListener('click', () => toggleWeight(i));
+    box.appendChild(btn);
+  });
+}
+
+function toggleWeight(i) {
+  const st = balanceState;
+  if (!st || st.lock) return;
+  const q = st.questions[st.idx];
+  if (st.placed.has(i)) st.placed.delete(i);
+  else st.placed.add(i);
+  tone(440, 0, 0.06, 'triangle', 0.08);
+  renderBalance();
+  const sum = st.leftSum;
+  if (sum === q.target) {
+    st.lock = true;
+    totalStars++;
+    earnedThisSet++;
+    saveStars();
+    soundCorrect();
+    setFeedback(`${pick(PRAISES)} つりあった！スターを ゲット！`, 'good');
+    st.timer = setTimeout(() => {
+      if (balanceState !== st) return;
+      st.idx++;
+      st.placed = new Set();
+      st.lock = false;
+      if (st.idx >= QUESTIONS_PER_SET) {
+        balanceState = null;
+        finishCustomSet(
+          earnedThisSet === QUESTIONS_PER_SET
+            ? '全部 つりあった！かんぺきだね！🏆'
+            : `${QUESTIONS_PER_SET}もん おわったよ！`
+        );
+      } else {
+        renderBalance();
+        setFeedback('おもりを タップして 左の お皿に のせよう。もういちど タップすると はずれるよ', '');
+      }
+    }, 1500);
+  } else if (sum > q.target) {
+    soundTry();
+    setFeedback(`重すぎるよ！いま ${sum}。${q.target} に なるように おもりを はずしてみよう`, 'try');
+  } else {
+    setFeedback(`あと ${q.target - sum} たりないよ。おもりを 足してみよう`, '');
+  }
 }
 
 /* ============ イベント ============ */

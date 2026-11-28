@@ -255,6 +255,82 @@ main { max-width: 720px; margin: 0 auto; padding: 16px; }
 }
 .target-bubble.miss { opacity: 0.35; }
 
+/* めもりーカード */
+.memory-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  max-width: 440px;
+  margin: 8px auto 0;
+}
+.memory-card {
+  font-family: inherit;
+  aspect-ratio: 3 / 3.4;
+  border-radius: 14px;
+  border: 3px solid #74c0fc;
+  background: linear-gradient(160deg, #a5d8ff, #74c0fc);
+  font-size: 1.9rem;
+  font-weight: bold;
+  color: #234;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  line-height: 1.1;
+  transition: transform 0.25s, background 0.25s;
+}
+.memory-card:active { transform: scale(0.95); }
+.memory-card.up { background: #fff; border-color: #ffd93d; }
+.memory-card.matched { background: #d3f9d8; border-color: #51cf66; }
+.memory-card.long { font-size: 1.3rem; }
+
+/* つりたいかい */
+.sea-stage { background: linear-gradient(180deg, #7fd4f7, #c9f2ff 70%, #aee7c9); }
+.fish-btn {
+  position: absolute;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: 2px;
+  animation-name: swim;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+}
+@keyframes swim {
+  0%, 100% { transform: translateX(-10px); }
+  50% { transform: translateX(12px); }
+}
+.fish-emoji { font-size: 2.6rem; line-height: 1.1; }
+.fish-label {
+  font-size: 1.15rem;
+  font-weight: bold;
+  color: #084298;
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid #74c0fc;
+  border-radius: 999px;
+  padding: 0 9px;
+  line-height: 1.5;
+}
+.fish-btn.caught { opacity: 0.3; filter: grayscale(0.8); animation: none; }
+.fish-btn.wrongfish { animation-name: shake; animation-duration: 0.4s; animation-iteration-count: 1; }
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-7px); }
+  75% { transform: translateX(7px); }
+}
+
+/* てんびんマスター */
+.question svg.balance-svg { max-width: 340px; width: 100%; display: block; margin: 2px auto; }
+.balance-svg .beam, .balance-svg .pan { transform-box: view-box; transition: transform 0.6s ease; }
+.choices.balance-chips { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); }
+.choice-btn.weight-chip.placed { background: #fff3b0; border-color: #ff9f1c; opacity: 0.8; }
+
 /* 結果画面 */
 .result-title { text-align: center; font-size: 2rem; margin-top: 40px; }
 .result-text { text-align: center; font-size: 1.4rem; font-weight: bold; }
